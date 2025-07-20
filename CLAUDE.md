@@ -3,6 +3,16 @@
 ## Overview
 This document provides project-specific instructions for Claude's task execution. It follows best practices for concise, declarative guidance that maximizes Claude's effectiveness.
 
+## Startup Behavior
+
+On startup, Claude must:
+1. Check environment variable `CLAUDE_ROLE` to determine operating mode
+2. If `CLAUDE_ROLE=LEADER`, operate as Team Leader (see Team-Based Execution Mode)
+3. If `CLAUDE_ROLE=MEMBER`, check `CLAUDE_TASK_ID` and operate as Team Member
+4. If neither is set, operate in traditional single-instance mode
+
+For team operations, immediately consult the "Team-Based Execution Mode" section below.
+
 ## Core Principles
 
 ### 1. Documentation First
@@ -367,6 +377,191 @@ tmux capture-pane -t "$SESSION" -p
 tmux capture-pane -t "$SESSION" -p > output.log
 ```
 
+## Team-Based Execution Mode
+
+### Overview
+Claude Code can operate in two distinct modes:
+- **TEAM LEADER**: Orchestrates, delegates, and coordinates team activities
+- **TEAM MEMBER**: Executes specific tasks assigned by the leader
+
+### Role Detection
+Claude determines its role on startup by checking:
+1. Environment variable `CLAUDE_ROLE` (LEADER or MEMBER)
+2. Environment variable `CLAUDE_TASK_ID` (for members)
+3. Default behavior: Single-instance mode (traditional)
+
+### Team Structure
+```
+.vibe/
+├── team/
+│   ├── roster.json          # Active team members and sessions
+│   ├── tasks/               # Task assignments
+│   │   └── task-XXX.json
+│   ├── messages/            # Inter-team communication
+│   │   ├── leader/
+│   │   └── members/
+│   └── results/             # Member work outputs
+```
+
+### TEAM LEADER Responsibilities
+
+1. **Task Planning**
+   - Analyze user requirements
+   - Break down complex tasks
+   - Determine team composition
+   - Create task assignments
+
+2. **Team Management (MANDATORY PARALLEL EXECUTION)**
+   - **MUST** start actual team members as separate Claude instances in tmux sessions
+   - **MUST NOT** simulate team work - always spawn real Claude processes
+   - **MUST** execute team members in parallel, not sequentially
+   - Monitor member progress via tmux output capture
+   - Handle member queries via message files
+   - Coordinate dependencies between parallel workers
+
+3. **Communication**
+   - Relay user instructions to members
+   - Aggregate member results
+   - Report status to user
+   - Handle exceptions
+
+4. **Orchestration Workflow**
+   ```bash
+   # Create task assignment
+   echo '{"task_id":"task-001",...}' > .vibe/team/tasks/task-001.json
+   
+   # Start team member
+   SESSION="claude_member_task-001_$(date +%s)"
+   tmux new-session -d -s "$SESSION" \
+     "CLAUDE_ROLE=MEMBER CLAUDE_TASK_ID=task-001 claude"
+   
+   # Monitor progress
+   while [ "$(jq -r .status .vibe/team/tasks/task-001.json)" != "completed" ]; do
+     sleep 5
+   done
+   ```
+
+### TEAM MEMBER Responsibilities
+
+1. **Task Execution**
+   - Read assigned task on startup
+   - Execute task instructions
+   - Update progress regularly
+   - Write results to designated location
+
+2. **Communication**
+   - Report status updates
+   - Request clarification when needed
+   - Signal completion or failure
+   - Document findings
+
+3. **Resource Management**
+   - Create own tmux sessions for long tasks
+   - Clean up temporary resources
+   - Manage task-specific state
+
+4. **Member Workflow**
+   ```bash
+   # On startup, check role
+   if [ "$CLAUDE_ROLE" = "MEMBER" ]; then
+     # Read task assignment
+     TASK_FILE=".vibe/team/tasks/${CLAUDE_TASK_ID}.json"
+     
+     # Execute task
+     # Update status
+     # Write results
+   fi
+   ```
+
+### Task File Format
+```json
+{
+  "task_id": "task-001",
+  "created_at": "2025-07-20T12:00:00Z",
+  "assigned_to": "member-1",
+  "status": "pending|in_progress|completed|failed",
+  "priority": "high|medium|low",
+  "description": "Clear task description",
+  "instructions": "Detailed step-by-step instructions",
+  "context": {
+    "relevant_files": [],
+    "dependencies": [],
+    "constraints": []
+  },
+  "results_path": ".vibe/team/results/member-1/task-001/",
+  "updates": [
+    {
+      "timestamp": "2025-07-20T12:05:00Z",
+      "status": "in_progress",
+      "message": "Started implementation"
+    }
+  ]
+}
+```
+
+### Message Protocol
+Members and leaders communicate via JSON files:
+```json
+{
+  "message_id": "msg-001",
+  "from": "leader|member-1",
+  "to": "member-1|leader",
+  "timestamp": "2025-07-20T12:00:00Z",
+  "type": "directive|query|status|result",
+  "content": "Message content",
+  "requires_response": false,
+  "response_to": null
+}
+```
+
+### Best Practices for Team Operations
+
+1. **Task Decomposition**
+   - Keep member tasks focused and specific
+   - Provide clear success criteria
+   - Include all necessary context
+   - Avoid overlapping responsibilities
+
+2. **Communication**
+   - Use structured message formats
+   - Poll for messages regularly
+   - Acknowledge receipt of directives
+   - Document decisions and rationale
+
+3. **Error Handling**
+   - Members should fail gracefully
+   - Leader monitors for timeouts
+   - Implement retry mechanisms
+   - Escalate blockers promptly
+
+4. **Resource Management**
+   - Limit concurrent team members
+   - Monitor system resources
+   - Clean up completed sessions
+   - Archive results systematically
+
+### Team Startup Checklist
+
+#### For TEAM LEADER:
+- [ ] Check .vibe/team/ structure exists
+- [ ] Load current roster state
+- [ ] Review pending tasks
+- [ ] Plan team composition
+- [ ] Start monitoring loops
+
+#### For TEAM MEMBER:
+- [ ] Verify CLAUDE_TASK_ID is set
+- [ ] Load task assignment
+- [ ] Create results directory
+- [ ] Begin task execution
+- [ ] Set up status reporting
+
+### Helper Scripts Location
+Team management scripts are available in:
+- `.vibe/scripts/start-team-member.sh`
+- `.vibe/scripts/monitor-team.sh`
+- `.vibe/scripts/aggregate-results.sh`
+
 ## Program Installation Procedures
 
 ### Installing Required Programs
@@ -395,4 +590,4 @@ jq --version
 
 ---
 *Last Updated: 2025-07-20*
-*Version: 2.1*
+*Version: 3.0*
